@@ -165,6 +165,8 @@ def map_response_from_bedrock():
     def _hook(
             response: httpx.Response,
     ) -> None:
+        if not response.is_success:
+            return
         stream = response.headers["content-type"] == "application/vnd.amazon.eventstream"
         endpoint = response.request.extensions["endpoint"]
         output: typing.Iterator[bytes]
