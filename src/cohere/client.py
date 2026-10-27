@@ -149,6 +149,7 @@ class Client(BaseCohere, CacheMixin):
 
         base_url = fix_base_url(base_url)
 
+        self._cache = {}
         self._executor = thread_pool_executor
 
         BaseCohere.__init__(
@@ -398,6 +399,7 @@ class AsyncClient(AsyncBaseCohere, CacheMixin):
 
         base_url = fix_base_url(base_url)
 
+        self._cache = {}
         self._executor = thread_pool_executor
 
         AsyncBaseCohere.__init__(
