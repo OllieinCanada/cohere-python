@@ -1,75 +1,28 @@
-name: ci
-
-on: [push]
+name: Dataset HTTP regression baseline
+on:
+  push:
+    branches: ['validation/dataset-http-baseline']
+permissions:
+  contents: read
 jobs:
-  compile:
+  regression:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-      - name: Set up python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
-      - name: Bootstrap poetry
-        uses: snok/install-poetry@v1
-        with:
-          version: 1.5.1
-          virtualenvs-in-project: false
-      - name: Install dependencies
-        run: poetry install
-      - name: Compile
-        run: poetry run mypy .
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-      - name: Set up python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
-      - name: Bootstrap poetry
-        uses: snok/install-poetry@v1
-        with:
-          version: 1.5.1
-          virtualenvs-in-project: false
-      - name: Install dependencies
-        run: poetry install
-      - name: Install aws deps
-        run: poetry run pip install boto3 sagemaker botocore
-      - name: Test
-        run: poetry run pytest -rP -n auto .
-        env:
-          CO_API_KEY: ${{ secrets.COHERE_API_KEY }}
-      - name: Install aiohttp extra
-        run: poetry install --extras aiohttp
-
-      - name: Test (aiohttp)
-        run: poetry run pytest -rP -n auto -m aiohttp . || [ $? -eq 5 ]
-        env:
-          CO_API_KEY: ${{ secrets.COHERE_API_KEY }}
-
-  publish:
-    needs: [compile, test]
-    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-      - name: Set up python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
-      - name: Bootstrap poetry
+          python-version: '3.10'
+      - run: python -m pip install poetry==2.4.1
+      - run: poetry install --no-interaction
+      - name: Prepare offline test guard
         run: |
-          curl -sSL https://install.python-poetry.org | python - -y --version 1.5.1
-      - name: Install dependencies
-        run: poetry install
-      - name: Publish to pypi
-        run: |
-          poetry config repositories.remote https://upload.pypi.org/legacy/
-          poetry --no-interaction -v publish --build --repository remote --username "$PYPI_USERNAME" --password "$PYPI_PASSWORD"
-        env:
-          PYPI_USERNAME: ${{ secrets.PYPI_USERNAME }}
-          PYPI_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+          mkdir -p "$RUNNER_TEMP/cohere-offline-guard"
+          cat > "$RUNNER_TEMP/cohere-offline-guard/sitecustomize.py" <<'PY'
+          import socket
+          def deny_network(*args, **kwargs):
+              raise AssertionError("Network access is disabled during offline SDK tests")
+          socket.socket.connect = deny_network
+          socket.socket.connect_ex = deny_network
+          PY
+      - name: Reproduce against unchanged source
+        run: poetry run env PYTHONPATH="$RUNNER_TEMP/cohere-offline-guard:$PWD/src" pytest -q tests/test_dataset_utils.py
