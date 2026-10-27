@@ -1,75 +1,142 @@
-name: ci
-
-on: [push]
+name: Cohere batch 06 Python SDK validation
+on:
+  push:
+    branches: ['validation/cohere-19-06']
+permissions:
+  contents: read
 jobs:
-  compile:
+  validate:
+    name: Offline Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.12']
+    env:
+      AWS_EC2_METADATA_DISABLED: 'true'
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-      - name: Set up python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
         with:
-          python-version: "3.10"
-      - name: Bootstrap poetry
-        uses: snok/install-poetry@v1
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
         with:
-          version: 1.5.1
-          virtualenvs-in-project: false
-      - name: Install dependencies
-        run: poetry install
-      - name: Compile
-        run: poetry run mypy .
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-      - name: Set up python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
-      - name: Bootstrap poetry
-        uses: snok/install-poetry@v1
-        with:
-          version: 1.5.1
-          virtualenvs-in-project: false
-      - name: Install dependencies
-        run: poetry install
-      - name: Install aws deps
-        run: poetry run pip install boto3 sagemaker botocore
-      - name: Test
-        run: poetry run pytest -rP -n auto .
-        env:
-          CO_API_KEY: ${{ secrets.COHERE_API_KEY }}
-      - name: Install aiohttp extra
-        run: poetry install --extras aiohttp
-
-      - name: Test (aiohttp)
-        run: poetry run pytest -rP -n auto -m aiohttp . || [ $? -eq 5 ]
-        env:
-          CO_API_KEY: ${{ secrets.COHERE_API_KEY }}
-
-  publish:
-    needs: [compile, test]
-    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-      - name: Set up python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
-      - name: Bootstrap poetry
+          python-version: '${{ matrix.python-version }}'
+      - run: python -m pip install poetry==2.4.1
+      - run: poetry install --no-interaction
+      - name: Prepare offline test guard
         run: |
-          curl -sSL https://install.python-poetry.org | python - -y --version 1.5.1
-      - name: Install dependencies
-        run: poetry install
-      - name: Publish to pypi
+          mkdir -p "$RUNNER_TEMP/cohere-offline-guard"
+          cat > "$RUNNER_TEMP/cohere-offline-guard/sitecustomize.py" <<'PY'
+          import socket
+          def deny_network(*args, **kwargs):
+              raise AssertionError("Network access is disabled during offline SDK tests")
+          socket.socket.connect = deny_network
+          socket.socket.connect_ex = deny_network
+          PY
+      - name: Prove regression against exact main
         run: |
-          poetry config repositories.remote https://upload.pypi.org/legacy/
-          poetry --no-interaction -v publish --build --repository remote --username "$PYPI_USERNAME" --password "$PYPI_PASSWORD"
-        env:
-          PYPI_USERNAME: ${{ secrets.PYPI_USERNAME }}
-          PYPI_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+          cat > "$RUNNER_TEMP/prove-before.py" <<'PY'
+          import pathlib, subprocess, xml.etree.ElementTree as ET
+          paths = ["src/cohere/client.py","src/cohere/manually_maintained/cache.py"]
+          head = {p: pathlib.Path(p).read_bytes() for p in paths}
+          try:
+              for p in paths:
+                  pathlib.Path(p).write_bytes(subprocess.check_output(["git", "show", "e6595a6d8f43f858327ef2dd5ddcccd96db4749b:" + p]))
+              result = subprocess.run(["poetry", "run", "pytest", "-q", "tests/test_client_cache.py", "--junitxml=/tmp/cohere-before.xml"])
+              suites = ET.parse("/tmp/cohere-before.xml").getroot()
+              total = len(suites.findall(".//testcase"))
+              failures = len(suites.findall(".//testcase/failure"))
+              errors = len(suites.findall(".//testcase/error"))
+              print("REGRESSION_BEFORE", result.returncode, total, failures, errors, flush=True)
+              assert result.returncode == 1 and total == 5 and failures == 4 and errors == 0
+          finally:
+              for p, content in head.items():
+                  pathlib.Path(p).write_bytes(content)
+          PY
+          poetry run env PYTHONPATH="$RUNNER_TEMP/cohere-offline-guard:$PWD/src" python "$RUNNER_TEMP/prove-before.py"
+      - name: Focused regression tests
+        run: poetry run env PYTHONPATH="$RUNNER_TEMP/cohere-offline-guard:$PWD/src" pytest -q tests/test_client_cache.py
+      - name: Broader offline unit suite
+        run: |
+          poetry run env PYTHONPATH="$RUNNER_TEMP/cohere-offline-guard:$PWD/src" pytest -q \
+            tests/test_dataset_utils.py tests/test_client_cache.py tests/test_embed_utils.py tests/test_embed_streaming.py \
+            tests/test_optional_auth.py tests/test_overrides.py tests/test_client_init.py \
+            tests/test_aws_client_unit.py tests/test_oci_mypy.py tests/test_oci_client.py
+      - run: poetry run mypy .
+      - run: poetry run ruff check tests/test_client_cache.py
+      - run: poetry run ruff format --check tests/test_client_cache.py
+      - name: Full lint and format diagnostics compared with exact base
+        run: |
+          cat > "$RUNNER_TEMP/compare-ruff-baseline.py" <<'PY'
+          import collections
+          import json
+          from pathlib import Path
+          import subprocess
+          
+          root = Path.cwd()
+          paths = ["src/cohere/client.py","src/cohere/manually_maintained/cache.py","tests/test_client_cache.py"]
+          head_files = {p: Path(p).read_bytes() for p in paths}
+          
+          def run(args):
+              print("$ " + " ".join(args), flush=True)
+              result = subprocess.run(args, capture_output=True, text=True)
+              print(result.stdout, end="", flush=True)
+              print(result.stderr, end="", flush=True)
+              print("exit code:", result.returncode, flush=True)
+              if result.returncode not in (0, 1):
+                  raise RuntimeError("Check failed to execute")
+              return result
+          
+          def findings():
+              result = run(["ruff", "check", ".", "--output-format=json"])
+              return collections.Counter(
+                  (str(Path(item["filename"]).relative_to(root)), item["code"], item["message"])
+                  for item in json.loads(result.stdout)
+              )
+          
+          def formatting():
+              result = run(["ruff", "format", "--check", "."])
+              return {line.removeprefix("Would reformat: ") for line in (result.stdout + result.stderr).splitlines()
+                      if line.startswith("Would reformat: ")}
+          
+          head_lint = findings()
+          head_format = formatting()
+          try:
+              for path in paths:
+                  if path == "tests/test_client_cache.py":
+                      Path(path).unlink()
+                  else:
+                      Path(path).write_bytes(subprocess.check_output(["git", "show", "e6595a6d8f43f858327ef2dd5ddcccd96db4749b:" + path]))
+              base_lint = findings()
+              base_format = formatting()
+          finally:
+              for path, content in head_files.items():
+                  Path(path).write_bytes(content)
+          
+          print("BASELINE_COMPARISON", json.dumps({
+              "head_lint_count": sum(head_lint.values()), "base_lint_count": sum(base_lint.values()),
+              "new_lint": list((head_lint - base_lint).elements()),
+              "new_format_files": sorted(head_format - base_format),
+              "base_format_count": len(base_format), "head_format_count": len(head_format),
+          }), flush=True)
+          assert not (head_lint - base_lint), "New lint findings"
+          assert not (head_format - base_format), "New formatting failures"
+          PY
+          poetry run python "$RUNNER_TEMP/compare-ruff-baseline.py"
+      - run: poetry build
+      - run: git diff --check
+      - run: git diff --exit-code
+  publish-branch:
+    name: Publish validated feature branch
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify feature files and publish
+        run: |
+          test "$(git diff --name-only f277afa94a909133973290d93f1df4ac25f80654 HEAD)" = ".github/workflows/ci.yml"
+          git push origin f277afa94a909133973290d93f1df4ac25f80654:refs/heads/fix/isolate-client-tokenizer-caches
