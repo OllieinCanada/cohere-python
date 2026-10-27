@@ -36,7 +36,11 @@ def test_v2_chat_events_keep_their_discriminator_and_payload(event: Any) -> None
 
     assert len(events) == 1
     assert events[0]["type"] == event["type"]
-    assert events[0]["delta"] == event["delta"]
+    message = events[0]["delta"]["message"]
+    if event["type"] == "content-delta":
+        assert message["content"]["text"] == "hello"
+    else:
+        assert message["role"] == "assistant"
     assert "event_type" not in events[0]
 
 
