@@ -13,6 +13,7 @@ from .client import Client, ClientEnvironment
 from .core import construct_type
 from .manually_maintained.lazy_aws_deps import lazy_boto3, lazy_botocore
 from .client_v2 import ClientV2
+from .v2.types.v2chat_stream_response import V2ChatStreamResponse
 
 class AwsClient(Client):
     def __init__(
@@ -135,7 +136,7 @@ stream_response_mapping: typing.Dict[str, typing.Any] = {
 }
 
 
-def stream_generator(response: httpx.Response, endpoint: str) -> typing.Iterator[bytes]:
+def stream_generator(response: httpx.Response, endpoint: str, api_version: int = 1) -> typing.Iterator[bytes]:
     regex = r"{[^\}]*}"
 
     for _text in response.iter_lines():
@@ -145,8 +146,11 @@ def stream_generator(response: httpx.Response, endpoint: str) -> typing.Iterator
             if "bytes" in obj:
                 base64_payload = base64.b64decode(obj["bytes"]).decode("utf-8")
                 streamed_obj = json.loads(base64_payload)
-                if "event_type" in streamed_obj:
-                    response_type = stream_response_mapping[endpoint]
+                if "event_type" in streamed_obj or "type" in streamed_obj:
+                    response_type = (
+                        V2ChatStreamResponse if api_version == 2 and endpoint == "chat"
+                        else stream_response_mapping[endpoint]
+                    )
                     parsed = typing.cast(response_type,  # type: ignore
                                          construct_type(type_=response_type, object_=streamed_obj))
                     yield (json.dumps(parsed.dict()) + "\n").encode("utf-8")  # type: ignore
@@ -173,7 +177,7 @@ def map_response_from_bedrock():
             output = stream_generator(httpx.Response(
                 stream=response.stream,
                 status_code=response.status_code,
-            ), endpoint)
+            ), endpoint, response.request.extensions.get("api_version", 1))
         else:
             response_type = response_mapping[endpoint]
             response_obj = json.loads(response.read())
@@ -265,6 +269,7 @@ def map_request_to_bedrock(
 
         request.headers = httpx.Headers(aws_request.prepare().headers)
         request.extensions["endpoint"] = endpoint
+        request.extensions["api_version"] = get_api_version(version=api_version)
 
     return _event_hook
 
