@@ -34,6 +34,7 @@ def get_hf_tokenizer(co: "Client", model: str) -> Tokenizer:
         logger.warn(f"Failed to get the size of the tokenizer config: {e}")
 
     response = requests.get(tokenizer_url)
+    response.raise_for_status()
     tokenizer = Tokenizer.from_str(response.text)
 
     co._cache_set(tokenizer_cache_key(model), tokenizer)
@@ -71,6 +72,7 @@ async def async_get_hf_tokenizer(co: "AsyncClient", model: str) -> Tokenizer:
         logger.warn(f"Failed to get the size of the tokenizer config: {e}")
 
     response = await asyncio.get_event_loop().run_in_executor(None, requests.get, tokenizer_url)
+    response.raise_for_status()
     tokenizer = Tokenizer.from_str(response.text)
 
     co._cache_set(tokenizer_cache_key(model), tokenizer)
