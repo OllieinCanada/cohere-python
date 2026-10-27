@@ -27,4 +27,6 @@ def test_simple_bedrock_model_is_unchanged() -> None:
 def test_sagemaker_endpoint_is_unchanged() -> None:
     url = get_url(platform="sagemaker", aws_region="us-east-1", model="cohere-endpoint", stream=True)
 
-    assert url == "https://runtime.sagemaker.us-east-1.amazonaws.com/endpoints/cohere-endpoint/invocations-response-stream"
+    assert url == (
+        "https://runtime.sagemaker.us-east-1.amazonaws.com/endpoints/cohere-endpoint/invocations-response-stream"
+    )
