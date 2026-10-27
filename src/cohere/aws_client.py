@@ -147,7 +147,8 @@ def stream_generator(response: httpx.Response, endpoint: str, api_version: int =
                 base64_payload = base64.b64decode(obj["bytes"]).decode("utf-8")
                 streamed_obj = json.loads(base64_payload)
                 if "event_type" in streamed_obj or "type" in streamed_obj:
-                    response_type = (
+                    # Generated response aliases are runtime discriminated unions.
+                    response_type: typing.Any = (
                         V2ChatStreamResponse if api_version == 2 and endpoint == "chat"
                         else stream_response_mapping[endpoint]
                     )
