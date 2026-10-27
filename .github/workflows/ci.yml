@@ -102,9 +102,9 @@ jobs:
           try:
               for path in paths:
                   if path == "tests/test_experimental_options.py":
-            Path(path).unlink()
-        else:
-            Path(path).write_bytes(subprocess.check_output(["git", "show", "e6595a6d8f43f858327ef2dd5ddcccd96db4749b:" + path]))
+                      Path(path).unlink()
+                  else:
+                      Path(path).write_bytes(subprocess.check_output(["git", "show", "e6595a6d8f43f858327ef2dd5ddcccd96db4749b:" + path]))
               base_lint = findings()
               base_format = formatting()
           finally:
