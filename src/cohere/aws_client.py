@@ -2,6 +2,7 @@ import base64
 import json
 import re
 import typing
+from urllib.parse import quote
 
 import httpx
 from httpx import URL, SyncByteStream, ByteStream
@@ -278,7 +279,7 @@ def get_url(
 ) -> str:
     if platform == "bedrock":
         endpoint = "invoke" if not stream else "invoke-with-response-stream"
-        return f"https://{platform}-runtime.{aws_region}.amazonaws.com/model/{model}/{endpoint}"
+        return f"https://{platform}-runtime.{aws_region}.amazonaws.com/model/{quote(model, safe='')}/{endpoint}"
     elif platform == "sagemaker":
         endpoint = "invocations" if not stream else "invocations-response-stream"
         return f"https://runtime.sagemaker.{aws_region}.amazonaws.com/endpoints/{model}/{endpoint}"
