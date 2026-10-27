@@ -88,6 +88,8 @@ def deprecated_function(fn_name: str) -> typing.Any:
 def experimental_kwarg_decorator(func, deprecated_kwarg):
     # Recursive utility function to check if a kwarg is present in the kwargs.
     def check_kwarg(deprecated_kwarg: str, kwargs: typing.Dict[str, typing.Any]) -> bool:
+        if not isinstance(kwargs, typing.Mapping):
+            return False
         if "." in deprecated_kwarg:
             key, rest = deprecated_kwarg.split(".", 1)
             if key in kwargs:
