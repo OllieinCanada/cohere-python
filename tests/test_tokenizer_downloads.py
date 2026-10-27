@@ -17,7 +17,6 @@ def setup_download(monkeypatch: Any, async_mode: bool, status: int = 200) -> tup
     response.status_code = status
     response.url = model.tokenizer_url
     response._content = b'{"version":"test"}'
-    response._content_consumed = True
     request = Mock(return_value=response)
     marker = object()
     decoder = Mock(return_value=marker)
