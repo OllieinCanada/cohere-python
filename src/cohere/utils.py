@@ -70,6 +70,15 @@ def get_failure_reason(job: typing.Union[EmbedJob, DatasetsGetResponse]) -> Opti
     return None
 
 
+def _remaining_wait_timeout(start_time: float, timeout: Optional[float]) -> Optional[float]:
+    if timeout is None:
+        return None
+    remaining = timeout - (time.monotonic() - start_time)
+    if remaining <= 0:
+        raise TimeoutError(f"wait timed out after {timeout} seconds")
+    return remaining
+
+
 @typing.overload
 def wait(
         cohere: typing.Any,
@@ -96,16 +105,16 @@ def wait(
         timeout: Optional[float] = None,
         interval: float = 2,
 ) -> typing.Union[EmbedJob, DatasetsGetResponse]:
-    start_time = time.time()
+    start_time = time.monotonic()
     terminal_states = get_terminal_states()
     failed_states = get_failed_states()
 
     job = get_job(cohere, awaitable)
     while get_validation_status(job) not in terminal_states:
-        if timeout is not None and time.time() - start_time > timeout:
-            raise TimeoutError(f"wait timed out after {timeout} seconds")
+        remaining = _remaining_wait_timeout(start_time, timeout)
 
-        time.sleep(interval)
+        time.sleep(interval if remaining is None else min(interval, remaining))
+        _remaining_wait_timeout(start_time, timeout)
         print("...")
 
         job = get_job(cohere, awaitable)
@@ -142,16 +151,16 @@ async def async_wait(
         timeout: Optional[float] = None,
         interval: float = 10,
 ) -> typing.Union[EmbedJob, DatasetsGetResponse]:
-    start_time = time.time()
+    start_time = time.monotonic()
     terminal_states = get_terminal_states()
     failed_states = get_failed_states()
 
     job = await async_get_job(cohere, awaitable)
     while get_validation_status(job) not in terminal_states:
-        if timeout is not None and time.time() - start_time > timeout:
-            raise TimeoutError(f"wait timed out after {timeout} seconds")
+        remaining = _remaining_wait_timeout(start_time, timeout)
 
-        await asyncio.sleep(interval)
+        await asyncio.sleep(interval if remaining is None else min(interval, remaining))
+        _remaining_wait_timeout(start_time, timeout)
         print("...")
 
         job = await async_get_job(cohere, awaitable)
