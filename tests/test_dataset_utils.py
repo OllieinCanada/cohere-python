@@ -8,7 +8,7 @@ from cohere.utils import dataset_generator
 
 class TrackingResponse:
     def __init__(self) -> None:
-        self.raw = object()
+        self.raw = SimpleNamespace()
         self.closed = False
 
     def close(self) -> None:
