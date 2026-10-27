@@ -133,7 +133,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - name: Verify feature files and publish
         run: |
           test "$(git diff --name-only 9e8dd20ea222e50c967a542c269c25926cad63a4 HEAD)" = ".github/workflows/ci.yml"
